@@ -4,6 +4,7 @@ use crate::{
 };
 use eyre::Result;
 use rocket::{
+    http::Status,
     get, post, routes,
     serde::{json::Json, Deserialize, Serialize},
 };
@@ -56,11 +57,13 @@ fn discover() -> Json<Response> {
 }
 
 #[post("/", format = "application/json", data = "<co_data>")]
-async fn register(co_data: Json<ConnectionData>) -> Json<Response> {
+async fn register(co_data: Json<ConnectionData>) -> Result<Json<Response>,Status> {
     let mut status = registration_status(&co_data).await;
+    let mut statusCode = Status::Accepted;
     match status {
         RegistrationStatus::Updated | RegistrationStatus::New => {
             if let Err(_) = new_connection(co_data) {
+                statusCode = Status::BadRequest;
                 status = RegistrationStatus::InternalError;
             }
         }
@@ -70,10 +73,12 @@ async fn register(co_data: Json<ConnectionData>) -> Json<Response> {
                     if let Ok(_) = new_connection(co_data) {
                         status = RegistrationStatus::Updated;
                     } else {
+                        statusCode = Status::BadRequest;
                         status = RegistrationStatus::InternalError;
                     }
                 }
             } else {
+                statusCode = Status::BadRequest;
                 status = RegistrationStatus::InternalError;
             }
         }
@@ -83,12 +88,14 @@ async fn register(co_data: Json<ConnectionData>) -> Json<Response> {
         // if the user register on another server or delete the linked device,
         // then the connection ends with a 403 Forbidden
         // If the connection is for an invalid uuid or an error occured : we ignore it
-        _ => {}
+        _ => {
+            statusCode = Status::NotFound;
+        }
     }
     gen_rep(HashMap::from([(
         String::from("status"),
         String::from(status),
-    )]))
+    )]), statusCode)
 }
 
 fn new_connection(co_data: Json<ConnectionData>) -> Result<()> {
